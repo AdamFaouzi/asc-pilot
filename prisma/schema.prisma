@@ -1,0 +1,504 @@
+// ASC-Pilot data model.
+//
+// Pipeline shape:
+//   DiscoveryRun --finds--> Business --qualifies--> Lead --generates--> GeneratedSite
+//                                                     |--contacts--> OutreachMessage
+//                                                     |--converts--> Subscription
+//
+// Every external data source is recorded on the row that came from it (`source`,
+// `sourceId`) so the places provider can be swapped without orphaning history.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7 no longer accepts `url` here: the connection string reaches the
+  // CLI through prisma.config.ts and the client through a driver adapter.
+}
+
+// ---------------------------------------------------------------------------
+// Discovery
+// ---------------------------------------------------------------------------
+
+enum DiscoveryRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// One scan of an area + category against a places provider.
+model DiscoveryRun {
+  id String @id @default(cuid())
+
+  /// Provider key, e.g. "google_places". Matches a registered PlacesProvider.
+  provider String
+  /// Free-text area as the operator typed it, e.g. "Limassol, Cyprus".
+  area     String
+  /// Optional category filter, e.g. "hair_salon". Null means scan broadly.
+  category String?
+  /// Centre point + radius actually sent to the provider, when resolved.
+  latitude  Float?
+  longitude Float?
+  radiusM   Int?
+
+  status DiscoveryRunStatus @default(PENDING)
+  error  String?
+
+  businessesSeen      Int @default(0)
+  businessesNew       Int @default(0)
+  businessesQualified Int @default(0)
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  businesses Business[]
+
+  @@index([status, createdAt])
+  @@map("discovery_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Businesses
+// ---------------------------------------------------------------------------
+
+/// Result of checking whether a business already has a web presence.
+/// Drives qualification: only NONE (and, at the operator's discretion,
+/// SOCIAL_ONLY) are worth pitching.
+enum WebsiteVerdict {
+  /// Not checked yet.
+  UNKNOWN
+  /// No website field and no site found by secondary search.
+  NONE
+  /// Only a social profile (Instagram/Facebook page) — still a candidate.
+  SOCIAL_ONLY
+  /// Only an aggregator/marketplace listing (Yelp, Deliveroo, Booking...).
+  DIRECTORY_ONLY
+  /// Has a real site of its own — disqualified.
+  HAS_WEBSITE
+}
+
+/// A business as observed from a places/search provider. Raw-ish; the
+/// qualification decision lives here, the outreach pipeline lives on Lead.
+model Business {
+  id String @id @default(cuid())
+
+  /// Provider key the record came from, e.g. "google_places".
+  source   String
+  /// Provider's own id for this business (Google place_id, etc.).
+  sourceId String
+
+  name        String
+  /// Provider category strings, e.g. ["hair_care", "beauty_salon"].
+  categories  String[] @default([])
+  /// Normalised primary category used for templating and reporting.
+  primaryCategory String?
+
+  formattedAddress String?
+  addressLine      String?
+  city             String?
+  region           String?
+  postalCode       String?
+  countryCode      String?
+  latitude         Float?
+  longitude        Float?
+
+  phone       String?
+  /// Website exactly as the provider reported it (usually null for our leads).
+  websiteUrl  String?
+
+  rating       Float?
+  reviewCount  Int?
+  priceLevel   Int?
+
+  /// Opening hours in a provider-neutral shape: [{ day, open, close }, ...].
+  openingHours Json?
+  /// Photo references/URLs usable for generation, with attribution.
+  photos       Json?
+  /// A few public reviews kept for copy generation.
+  reviews      Json?
+
+  websiteVerdict   WebsiteVerdict @default(UNKNOWN)
+  /// What the secondary check found: queries run, candidate URLs, reasoning.
+  websiteEvidence  Json?
+  websiteCheckedAt DateTime?
+
+  /// Untouched provider payload, so re-parsing never needs another API call.
+  raw Json?
+
+  discoveryRunId String?
+  discoveryRun   DiscoveryRun? @relation(fields: [discoveryRunId], references: [id], onDelete: SetNull)
+
+  contacts Contact[]
+  lead     Lead?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([source, sourceId])
+  @@index([websiteVerdict])
+  @@index([city, primaryCategory])
+  @@map("businesses")
+}
+
+enum ContactChannel {
+  EMAIL
+  PHONE
+  INSTAGRAM
+  FACEBOOK
+  WHATSAPP
+  CONTACT_FORM
+}
+
+/// A discovered way to reach a business. Kept as rows rather than a single
+/// `email` column because discovery finds several candidates of varying
+/// quality and the operator needs to see where each came from.
+model Contact {
+  id String @id @default(cuid())
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  channel ContactChannel
+  /// Normalised address/handle/number.
+  value   String
+  /// Where it came from, e.g. "google_places", "facebook_page", "site_scrape".
+  source  String
+  /// 0..1 — how sure we are this reaches the owner. Below the configured
+  /// threshold the lead goes to manual review instead of automated outreach.
+  confidence Float @default(0)
+
+  /// Preferred contact for its channel.
+  isPrimary  Boolean @default(false)
+  verifiedAt DateTime?
+
+  /// info@/contact@ rather than a person's name. Role addresses are both more
+  /// likely to be monitored and cleaner under ePrivacy, which treats mail to a
+  /// legal person differently from mail to a natural one.
+  isRoleAddress Boolean @default(false)
+  /// Address at a mailbox provider (gmail.com, hotmail.com) rather than a
+  /// domain the business owns. Correlates strongly with having no website —
+  /// these are the target market, not a quality problem — but raises the
+  /// chance the recipient is a natural person for GDPR purposes.
+  isFreeMailbox Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, channel, value])
+  @@index([channel, value])
+  @@map("contacts")
+}
+
+// ---------------------------------------------------------------------------
+// Leads
+// ---------------------------------------------------------------------------
+
+enum LeadStatus {
+  /// Qualified, nothing generated yet.
+  NEW
+  /// Held back for a human decision (no email, ambiguous website verdict...).
+  NEEDS_REVIEW
+  SITE_GENERATING
+  SITE_READY
+  /// Operator approved the generated site for outreach.
+  APPROVED
+  OUTREACH_SENT
+  REPLIED
+  CONVERTED
+  /// Explicitly not interested, or opted out.
+  DECLINED
+  /// Bad data, duplicate, closed down.
+  DISQUALIFIED
+}
+
+/// A business we intend to pitch. Carries the pipeline state; Business stays
+/// a faithful record of what the provider said.
+model Lead {
+  id String @id @default(cuid())
+
+  businessId String   @unique
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  status LeadStatus @default(NEW)
+  /// URL-safe identifier used for the preview subdomain/path.
+  slug   String     @unique
+
+  /// Denormalised for fast dashboard filtering and stable outreach targeting.
+  primaryEmail String?
+
+  /// Set when status is NEEDS_REVIEW or DISQUALIFIED.
+  reviewReason String?
+  notes        String?
+
+  qualifiedAt DateTime?
+  approvedAt  DateTime?
+  convertedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sites        GeneratedSite[]
+  outreach     OutreachMessage[]
+  subscription Subscription?
+
+  @@index([status, updatedAt])
+  @@map("leads")
+}
+
+// ---------------------------------------------------------------------------
+// Generated sites
+// ---------------------------------------------------------------------------
+
+enum SiteStatus {
+  DRAFT
+  GENERATING
+  /// Built and deployed to a preview URL, safe to link in outreach.
+  PREVIEW
+  /// Paid for and serving as the business's real site.
+  LIVE
+  /// Reviewed and sent back for rework — must not be pitched as it stands.
+  NEEDS_WORK
+  /// Superseded by a newer version, or subscription ended.
+  ARCHIVED
+  FAILED
+}
+
+/// One generated version of a lead's site. Versions are kept so the operator
+/// can edit, regenerate, and roll back without losing what was already sent.
+model GeneratedSite {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  version Int
+  status  SiteStatus @default(DRAFT)
+
+  /// Which generator produced this, e.g. "claude". Swappable per config.
+  generator      String
+  generatorModel String?
+  /// Layout/theme variant, so sites in the same category don't look identical.
+  template       String?
+
+  /// Structured content the renderer consumes (hero copy, services, hours...).
+  content Json?
+  /// Rendered output when the generator emits files directly.
+  html    String?
+  assets  Json?
+
+  /// Which hosting provider this version was deployed with, e.g. "vercel".
+  hostingProvider String?
+  /// Provider's deployment identifier, for teardown and status checks.
+  deploymentId    String?
+  previewUrl      String?
+  liveUrl         String?
+  customDomain    String?
+
+  /// True once a human has looked at it. Outreach must not go out otherwise.
+  reviewedByHuman Boolean @default(false)
+  editedByHuman   Boolean @default(false)
+  reviewedAt      DateTime?
+  /// Why it was sent back, when the reviewer rejected it.
+  reviewNote      String?
+
+  error String?
+
+  generatedAt DateTime?
+  deployedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  outreach OutreachMessage[]
+
+  @@unique([leadId, version])
+  @@index([status, updatedAt])
+  @@map("generated_sites")
+}
+
+// ---------------------------------------------------------------------------
+// Outreach
+// ---------------------------------------------------------------------------
+
+enum OutreachChannel {
+  EMAIL
+}
+
+enum OutreachStatus {
+  /// Row created, nothing sent. Phase 4 turns these into real sends.
+  QUEUED
+  /// Blocked before sending: suppression list, rate limit, missing consent.
+  BLOCKED
+  SENDING
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  REPLIED
+  BOUNCED
+  COMPLAINED
+  FAILED
+}
+
+/// Append-only log: one row per outreach attempt. Nothing is ever sent without
+/// a row here first, so the log is the audit trail for GDPR/ePrivacy questions.
+model OutreachMessage {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// The exact site version linked in the message.
+  siteId String?
+  site   GeneratedSite? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  channel OutreachChannel @default(EMAIL)
+  status  OutreachStatus  @default(QUEUED)
+
+  /// Email provider key, e.g. "resend". Never a personal mailbox.
+  provider          String?
+  /// Provider's message id, used to reconcile webhooks.
+  providerMessageId String?
+
+  fromAddress String?
+  toAddress   String
+  subject     String?
+  bodyText    String?
+  bodyHtml    String?
+  /// Template + variables used, so a message can be reproduced exactly.
+  template    String?
+
+  /// Per-recipient token behind the unsubscribe link.
+  unsubscribeToken String? @unique
+
+  /// Why a BLOCKED/FAILED row never went out.
+  blockedReason String?
+  error         String?
+
+  queuedAt    DateTime  @default(now())
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  firstOpenAt DateTime?
+  firstClickAt DateTime?
+  repliedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events OutreachEvent[]
+
+  @@index([status, queuedAt])
+  @@index([toAddress])
+  @@map("outreach_log")
+}
+
+/// Raw provider webhook events (delivery, open, click, bounce, complaint).
+model OutreachEvent {
+  id String @id @default(cuid())
+
+  messageId String
+  message   OutreachMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  /// Provider's event name, kept verbatim.
+  type       String
+  payload    Json?
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([messageId, occurredAt])
+  @@map("outreach_events")
+}
+
+enum SuppressionReason {
+  UNSUBSCRIBED
+  COMPLAINED
+  HARD_BOUNCE
+  /// Added by the operator.
+  MANUAL
+}
+
+/// Do-not-contact list, checked before every send. Keyed by email rather than
+/// by lead so an opt-out survives re-discovery of the same business.
+model Suppression {
+  id String @id @default(cuid())
+
+  /// Lowercased email address.
+  email  String            @unique
+  reason SuppressionReason
+  note   String?
+  /// Where the opt-out came from: "unsubscribe_link", "webhook", "manual".
+  source String?
+
+  createdAt DateTime @default(now())
+
+  @@map("suppressions")
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+/// Mirrors the Stripe subscription that pays for a lead's site. Stripe stays
+/// the source of truth; this table exists so the dashboard and the site
+/// promotion logic don't need a Stripe round-trip.
+model Subscription {
+  id String @id @default(cuid())
+
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  stripeCustomerId     String  @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId        String?
+
+  status SubscriptionStatus @default(INCOMPLETE)
+
+  /// Minor units, e.g. 5000 for €50.00.
+  amountCents Int    @default(3000)
+  currency    String @default("eur")
+  interval    String @default("month")
+
+  customerEmail String?
+
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean   @default(false)
+  canceledAt        DateTime?
+  startedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+/// Stripe webhook de-duplication. Stripe retries; handlers must be idempotent.
+model ProcessedWebhookEvent {
+  id String @id @default(cuid())
+
+  /// Provider key, e.g. "stripe" or "resend".
+  provider    String
+  /// Provider's event id.
+  eventId     String
+  type        String?
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@map("processed_webhook_events")
+}

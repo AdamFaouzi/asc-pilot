@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ascpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ascpilot
+      POSTGRES_PASSWORD: ascpilot
+      POSTGRES_DB: ascpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - ascpilot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ascpilot -d ascpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ascpilot-pgdata:

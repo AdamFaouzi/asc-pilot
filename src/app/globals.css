@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: oklch(0.16 0.012 265);
+  --color-ink-900: oklch(0.21 0.014 265);
+  --color-ink-800: oklch(0.27 0.015 265);
+  --color-ink-700: oklch(0.36 0.014 265);
+  --color-ink-400: oklch(0.65 0.012 265);
+  --color-ink-200: oklch(0.86 0.008 265);
+  --color-ink-50: oklch(0.97 0.004 265);
+
+  --color-signal: oklch(0.72 0.15 165);
+  --color-caution: oklch(0.78 0.14 85);
+  --color-alarm: oklch(0.65 0.19 25);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-50);
+}
+
+/* Shared section label for the ops pages. */
+.section-heading {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-400);
+}

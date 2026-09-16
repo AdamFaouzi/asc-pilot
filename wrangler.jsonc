@@ -1,0 +1,24 @@
+{
+  // The marketing site (www/) is served by a Worker with static assets, not by
+  // Cloudflare Pages. The name must stay "asc-pilot": that is the existing
+  // Worker, and asc-pilot.com is attached to it as a custom domain. Deploying
+  // under any other name creates a second Worker with no domain, and the live
+  // site does not change.
+  //
+  //   npx wrangler deploy
+  //
+  "name": "asc-pilot",
+  "compatibility_date": "2026-08-29",
+
+  "assets": {
+    "directory": "./www",
+
+    // Serves /terms from www/terms.html and 307s /terms.html to /terms. This
+    // is why there is no _redirects file: a rule sending /terms back to
+    // /terms.html fights this and builds an infinite redirect loop.
+    "html_handling": "auto-trailing-slash",
+
+    // Unknown paths get the branded www/404.html rather than a bare 404.
+    "not_found_handling": "404-page"
+  }
+}
