@@ -11,6 +11,19 @@ things need a public URL before any of it works:
 
 So the order is: deploy, point the domain, then wire Stripe.
 
+## The apex is taken
+
+`asc-pilot.com` serves the **marketing site** — a Cloudflare Worker with static
+assets, deployed from `www/` (see `wrangler.jsonc`). The app cannot have the
+apex as well, so it goes on a subdomain:
+
+| Host | What it serves |
+| --- | --- |
+| `asc-pilot.com` | marketing site, Cloudflare Worker, static |
+| `app.asc-pilot.com` | this Next.js app, preview and live sites, webhooks |
+
+Preview links are then `https://app.asc-pilot.com/s/preview/<slug>`.
+
 ## Choosing a host
 
 The app now serves generated sites **from the database** rather than from disk,
@@ -34,8 +47,9 @@ general, but only after uploads move to blob storage.
 
 ```bash
 DATABASE_URL="postgresql://…"          # managed Postgres, not the Docker one
-APP_URL="https://asc-pilot.com"        # no trailing slash
-PREVIEW_DOMAIN="asc-pilot.com"
+APP_URL="https://app.asc-pilot.com"    # no trailing slash; apex is the
+                                        # marketing site, not this app
+PREVIEW_DOMAIN="app.asc-pilot.com"
 NODE_ENV="production"
 
 ANTHROPIC_API_KEY="sk-ant-…"
@@ -61,15 +75,16 @@ once and keep it.
 
 ## After the domain points at the app
 
-1. Set `APP_URL` to `https://asc-pilot.com`.
+1. Set `APP_URL` to `https://app.asc-pilot.com`.
 2. Run `npm run rerender`. Preview URLs, the checkout call and the offer banner
    are baked into each site's HTML — a site rendered against `localhost` keeps
    pointing at localhost forever otherwise.
-3. Check one site loads at `https://asc-pilot.com/s/preview/<slug>`.
+3. Check one site loads at `https://app.asc-pilot.com/s/preview/<slug>`.
 
 ## DNS
 
-- **The app**: an A or CNAME record at the host, per its instructions.
+- **The app**: a CNAME for `app` at the host, per its instructions. Leave the
+  apex record alone — it points at the marketing Worker.
 - **Email** (Phase 4, later): Resend needs SPF, DKIM and DMARC records on a
   sending subdomain — `send.asc-pilot.com` rather than the apex, so a
   deliverability problem never affects the main domain.
