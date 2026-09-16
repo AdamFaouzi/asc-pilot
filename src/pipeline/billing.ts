@@ -39,7 +39,15 @@ export async function createCheckoutSession(slug: string): Promise<{ url: string
     where: { slug },
     include: {
       business: { select: { name: true } },
-      sites: { where: { status: "PREVIEW" }, orderBy: { version: "desc" }, take: 1 },
+      // Only a reviewed site can be bought. Paying is the second path to
+      // live, alongside outreach, and it strips the noindex — so it needs the
+      // same human check. Without this a guessed slug could put an unreviewed
+      // page, unverifiedClaims and all, online under a real business's name.
+      sites: {
+        where: { status: "PREVIEW", reviewedByHuman: true },
+        orderBy: { version: "desc" },
+        take: 1,
+      },
       subscription: true,
     },
   });
@@ -50,7 +58,8 @@ export async function createCheckoutSession(slug: string): Promise<{ url: string
   }
 
   const site = lead.sites[0];
-  if (!site) throw new Error("No preview site to promote");
+  // Reaches the visitor: the button renders this in its error line.
+  if (!site) throw new Error("This site has not been approved yet");
 
   const appUrl = env.APP_URL.replace(/\/$/, "");
 
