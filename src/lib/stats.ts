@@ -97,7 +97,15 @@ export async function getPipelineStats(): Promise<PipelineStats> {
     ["approved", "Approved", reached(["APPROVED", ...contactedOnwards])],
     ["contacted", "Contacted", reached(contactedOnwards)],
     ["replied", "Replied", reached(["REPLIED", "CONVERTED"])],
-    ["converted", "Paying", reached(["CONVERTED"])],
+    /*
+     * The one stage that is current state rather than "reached at least".
+     * `takeDown` archives a cancelled site but leaves the lead CONVERTED —
+     * that status records what happened, not who is paying now. Counting it
+     * here would keep a churned business in the Paying row forever while MRR
+     * correctly dropped to zero, so this reads the same source MRR does.
+     * It cannot exceed the row above it: a subscription implies a conversion.
+     */
+    ["converted", "Paying", activeSubscriptions],
   ];
 
   const funnel: FunnelStage[] = stageCounts.map(([key, label, count], index) => {
@@ -135,7 +143,9 @@ export async function getPipelineStats(): Promise<PipelineStats> {
     outreachSent: sum(outreachByStatus, SENT_STATUSES),
     outreachQueued: countOf(outreachByStatus, "QUEUED"),
     replies: countOf(outreachByStatus, "REPLIED"),
+    /** Leads that ever converted, churn included. History, not revenue. */
     conversions: countOf(leadsByStatus, "CONVERTED"),
+    /** Businesses paying right now. The number MRR is derived from. */
     activeSubscriptions,
     mrrCents: revenue._sum.amountCents ?? 0,
     suppressions,
