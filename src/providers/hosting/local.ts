@@ -1,4 +1,4 @@
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, constants, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { DeployResult, DeployTarget } from "@/core/types";
@@ -7,10 +7,23 @@ import { logger } from "@/lib/logger";
 
 import type { HostingProvider } from "./types";
 
-/** A filesystem that refuses writes, as on a serverless host. */
-function isReadOnly(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return code === "EROFS" || code === "EACCES" || code === "EPERM";
+/**
+ * Whether this process can write beside its own code.
+ *
+ * Checked rather than inferred from an errno: a serverless host reports the
+ * refusal differently depending on the path and the runtime — Vercel answers
+ * `mkdir /var/task/generated-sites` with ENOENT, not the EROFS you would
+ * expect — and guessing the code wrongly turns a skippable write into a failed
+ * customer promotion. Resolved once; the answer cannot change mid-process.
+ */
+let writable: Promise<boolean> | null = null;
+
+function canWriteHere(): Promise<boolean> {
+  writable ??= access(process.cwd(), constants.W_OK).then(
+    () => true,
+    () => false,
+  );
+  return writable;
 }
 
 /**
@@ -22,11 +35,10 @@ function isReadOnly(error: unknown): boolean {
  * reads the HTML from the database and only falls back to disk, because a
  * serverless filesystem does not survive between requests anyway.
  *
- * So a read-only filesystem is not a deployment failure. On Vercel every path
- * outside /tmp rejects writes with EROFS, and throwing there took down the
- * whole promotion: `goLive` calls `deploy` before the transaction that marks
- * the site LIVE, so a business could pay, get a subscription row, and never
- * get their site. The write is skipped and reported instead.
+ * So a read-only filesystem is not a deployment failure. Throwing there took
+ * down the whole promotion: `goLive` calls `deploy` before the transaction
+ * that marks the site LIVE, so a business could pay, get a subscription row,
+ * and never get their site. The write is skipped and reported instead.
  */
 export class LocalHostingProvider implements HostingProvider {
   readonly key = "local";
@@ -45,7 +57,7 @@ export class LocalHostingProvider implements HostingProvider {
   async deploy(target: DeployTarget, files: Record<string, string>): Promise<DeployResult> {
     const dir = this.dirFor(target);
 
-    try {
+    if (await canWriteHere()) {
       await mkdir(dir, { recursive: true });
 
       for (const [relativePath, contents] of Object.entries(files)) {
@@ -57,15 +69,11 @@ export class LocalHostingProvider implements HostingProvider {
         await mkdir(path.dirname(destination), { recursive: true });
         await writeFile(destination, contents, "utf8");
       }
-    } catch (error) {
-      // Only a read-only filesystem is tolerated, and only because the caller
-      // stores the same HTML in the database. Anything else is a real fault
-      // and still throws.
-      if (!isReadOnly(error)) throw error;
-      logger.warn("hosting.local_readonly", {
+    } else {
+      logger.warn("hosting.local_no_filesystem", {
         slug: target.slug,
         environment: target.environment,
-        detail: "filesystem is read-only; serving from the database copy",
+        detail: "read-only filesystem; the database copy is what gets served",
       });
     }
 
@@ -85,16 +93,9 @@ export class LocalHostingProvider implements HostingProvider {
     const source = path.join(this.root, deploymentId);
     const destination = this.dirFor(target);
 
-    try {
+    if (await canWriteHere()) {
       await mkdir(path.dirname(destination), { recursive: true });
       await cp(source, destination, { recursive: true });
-    } catch (error) {
-      if (!isReadOnly(error)) throw error;
-      logger.warn("hosting.local_readonly", {
-        slug: target.slug,
-        environment: target.environment,
-        detail: "filesystem is read-only; promotion recorded in the database",
-      });
     }
 
     return {
@@ -105,11 +106,8 @@ export class LocalHostingProvider implements HostingProvider {
   }
 
   async remove(deploymentId: string): Promise<void> {
-    try {
-      await rm(path.join(this.root, deploymentId), { recursive: true, force: true });
-    } catch (error) {
-      // A cancellation must still take the site down in the database.
-      if (!isReadOnly(error)) throw error;
-    }
+    // A cancellation must take the site down whether or not files exist.
+    if (!(await canWriteHere())) return;
+    await rm(path.join(this.root, deploymentId), { recursive: true, force: true });
   }
 }
