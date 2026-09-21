@@ -81,6 +81,22 @@ once and keep it.
    pointing at localhost forever otherwise.
 3. Check one site loads at `https://app.asc-pilot.com/s/preview/<slug>`.
 
+## Commits must be authored by the GitHub account Vercel knows
+
+Vercel Hobby does not support collaborators on a private repository, so a push
+whose commit author it cannot match to the project owner is refused with
+"Deployment Blocked: the commit author did not have contributing access". The
+build never starts, so it does not look like a build failure.
+
+Keep the git identity on the GitHub account's own address:
+
+```bash
+git config user.email "187595709+AdamFaouzi@users.noreply.github.com"
+```
+
+The noreply form always attributes the commit to the account, whatever address
+the machine is otherwise configured with.
+
 ## DNS
 
 - **The app**: a CNAME for `app` at the host, per its instructions. Leave the
