@@ -132,10 +132,10 @@ export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
       )}
 
       <div className="min-h-0 flex-1 bg-ink-900">
-        {card.previewUrl ? (
+        {card.slug ? (
           <iframe
             key={card.siteId}
-            src={card.previewUrl}
+            src={`/s/preview/${card.slug}`}
             title={`Preview of ${card.businessName}`}
             className="h-full w-full border-0 bg-white"
           />
@@ -198,7 +198,7 @@ export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
               <span className="ml-2 font-mono text-xs opacity-70">→</span>
             </button>
             <a
-              href={card.previewUrl ?? "#"}
+              href={card.slug ? `/s/preview/${card.slug}` : "#"}
               target="_blank"
               rel="noreferrer"
               className="ml-auto text-xs text-ink-400 hover:text-ink-200"
