@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { getEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,24 @@ export async function GET(
     orderBy: { version: "desc" },
     select: { html: true },
   });
+
+  /*
+   * A preview that has been bought is now LIVE, so the preview row is gone.
+   * Send the visitor to the live page instead of a 404 — otherwise paying is
+   * followed by "Site not found": Stripe's success_url is the preview path,
+   * and the webhook has usually promoted the site before the customer's
+   * browser gets back. Every preview link already sent in outreach has the
+   * same problem the moment the business subscribes.
+   */
+  if (!site && !live) {
+    const promoted = await prisma.generatedSite.findFirst({
+      where: { lead: { slug }, status: "LIVE" },
+      select: { id: true },
+    });
+    if (promoted) {
+      return NextResponse.redirect(new URL(`/s/live/${slug}`, getEnv().APP_URL), 307);
+    }
+  }
 
   let html = site?.html ?? null;
 
