@@ -78,6 +78,9 @@ export interface ReviewCard {
   businessName: string;
   category: string | null;
   city: string | null;
+  /** For sorting the queue by how far the business is from the reviewer. */
+  latitude: number | null;
+  longitude: number | null;
   phone: string | null;
   email: string | null;
   template: string | null;
@@ -103,7 +106,14 @@ export async function pendingReview(limit = 100): Promise<ReviewCard[]> {
           slug: true,
           primaryEmail: true,
           business: {
-            select: { name: true, primaryCategory: true, city: true, phone: true },
+            select: {
+              name: true,
+              primaryCategory: true,
+              city: true,
+              phone: true,
+              latitude: true,
+              longitude: true,
+            },
           },
         },
       },
@@ -116,6 +126,8 @@ export async function pendingReview(limit = 100): Promise<ReviewCard[]> {
     businessName: site.lead.business.name,
     category: site.lead.business.primaryCategory,
     city: site.lead.business.city,
+    latitude: site.lead.business.latitude,
+    longitude: site.lead.business.longitude,
     phone: site.lead.business.phone,
     email: site.lead.primaryEmail,
     template: site.template,

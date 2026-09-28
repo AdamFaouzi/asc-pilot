@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ReviewCard } from "@/pipeline/review";
 
@@ -13,6 +13,28 @@ import type { ReviewCard } from "@/pipeline/review";
  */
 
 type Outcome = "accept" | "reject";
+type Order = "queue" | "near";
+
+/** Kilometres between two points, good enough for ordering a review queue. */
+function distanceKm(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+): number {
+  const R = 6371;
+  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
+  const dLon = ((to.lon - from.lon) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((from.lat * Math.PI) / 180) *
+      Math.cos((to.lat * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Turns "coffee_shop" into "coffee shop", which is what a human reads. */
+function readable(category: string): string {
+  return category.replace(/_/g, " ");
+}
 
 const QUICK_NOTES = [
   "Wrong template for this business",
@@ -22,14 +44,85 @@ const QUICK_NOTES = [
 ];
 
 export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
-  const [index, setIndex] = useState(0);
-  const [done, setDone] = useState<Array<{ slug: string; decision: Outcome }>>([]);
+  const [done, setDone] = useState<Array<{ siteId: string; slug: string; decision: Outcome }>>([]);
   const [note, setNote] = useState("");
   const [noting, setNoting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const card = cards[index];
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [order, setOrder] = useState<Order>("queue");
+  const [origin, setOrigin] = useState<{ lat: number; lon: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const categories = useMemo(
+    () =>
+      Array.from(new Set(cards.map((c) => c.category).filter((c): c is string => Boolean(c)))).sort(),
+    [cards],
+  );
+
+  /*
+   * A decided card leaves the queue rather than the queue advancing past it.
+   * With filters in play an index would point at a different business every
+   * time the filter changed, and the reviewer would lose their place.
+   */
+  const decided = useMemo(() => new Set(done.map((entry) => entry.siteId)), [done]);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+
+    const matching = cards.filter((c) => {
+      if (decided.has(c.siteId)) return false;
+      if (category && c.category !== category) return false;
+      if (!needle) return true;
+      return [c.businessName, c.city, c.category]
+        .filter(Boolean)
+        .some((field) => field!.toLowerCase().includes(needle));
+    });
+
+    if (order !== "near" || !origin) return matching;
+
+    // Businesses with no coordinates sort last rather than disappearing.
+    return [...matching].sort((a, b) => {
+      const da = a.latitude != null && a.longitude != null
+        ? distanceKm(origin, { lat: a.latitude, lon: a.longitude })
+        : Infinity;
+      const db = b.latitude != null && b.longitude != null
+        ? distanceKm(origin, { lat: b.latitude, lon: b.longitude })
+        : Infinity;
+      return da - db;
+    });
+  }, [cards, decided, query, category, order, origin]);
+
+  const card = visible[0];
+
+  const away =
+    card && origin && card.latitude != null && card.longitude != null
+      ? distanceKm(origin, { lat: card.latitude, lon: card.longitude })
+      : null;
+
+  const locate = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocationError("This browser cannot share a location.");
+      return;
+    }
+    setLocating(true);
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setOrigin({ lat: position.coords.latitude, lon: position.coords.longitude });
+        setOrder("near");
+        setLocating(false);
+      },
+      () => {
+        setLocationError("Location refused. Sorting by queue order instead.");
+        setLocating(false);
+      },
+      { timeout: 10000 },
+    );
+  }, []);
 
   const submit = useCallback(
     async (decision: Outcome, reason?: string) => {
@@ -49,8 +142,7 @@ export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
           throw new Error(body.error ?? `Request failed (${response.status})`);
         }
 
-        setDone((previous) => [...previous, { slug: card.slug, decision }]);
-        setIndex((previous) => previous + 1);
+        setDone((previous) => [...previous, { siteId: card.siteId, slug: card.slug, decision }]);
         setNote("");
         setNoting(false);
       } catch (caught) {
@@ -84,6 +176,95 @@ export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [submit, noting]);
 
+  /*
+   * Rendered above the deck and above the empty states alike. A search that
+   * narrows to nothing must not take the search box away with it, or the only
+   * way back is to start the query again.
+   */
+  const filterBar = (
+  <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-ink-800 px-6 py-2">
+    <input
+      value={query}
+      onChange={(event) => setQuery(event.target.value)}
+      placeholder="Search name, town, category"
+      className="min-w-48 flex-1 rounded-md border border-ink-800 bg-ink-900 px-2 py-1.5 text-xs outline-none placeholder:text-ink-700 focus:border-ink-700"
+    />
+
+    <select
+      value={category}
+      onChange={(event) => setCategory(event.target.value)}
+      className="rounded-md border border-ink-800 bg-ink-900 px-2 py-1.5 text-xs outline-none focus:border-ink-700"
+    >
+      <option value="">Every category</option>
+      {categories.map((value) => (
+        <option key={value} value={value}>
+          {readable(value)}
+        </option>
+      ))}
+    </select>
+
+    {origin ? (
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setOrder("queue")}
+          className={`rounded-md px-2 py-1.5 text-xs ${order === "queue" ? "bg-ink-800 text-ink-200" : "text-ink-400 hover:text-ink-200"}`}
+        >
+          Queue order
+        </button>
+        <button
+          type="button"
+          onClick={() => setOrder("near")}
+          className={`rounded-md px-2 py-1.5 text-xs ${order === "near" ? "bg-ink-800 text-ink-200" : "text-ink-400 hover:text-ink-200"}`}
+        >
+          Nearest first
+        </button>
+      </div>
+    ) : (
+      <button
+        type="button"
+        onClick={locate}
+        disabled={locating}
+        className="rounded-md border border-ink-800 px-2 py-1.5 text-xs text-ink-400 hover:text-ink-200 disabled:opacity-50"
+      >
+        {locating ? "Locating…" : "Sort by nearest"}
+      </button>
+    )}
+
+    {locationError && <span className="text-xs text-caution">{locationError}</span>}
+  </div>
+  );
+
+  const filtering = Boolean(query.trim() || category);
+
+  if (!card && filtering) {
+    return (
+      <div className="flex h-screen flex-col">
+        {filterBar}
+        <div className="mx-auto max-w-lg px-6 py-24 text-center">
+        <h1 className="text-2xl font-semibold">Nothing matches</h1>
+        <p className="mt-3 text-sm text-ink-400">
+          No site left to review for{" "}
+          {[query.trim() && `"${query.trim()}"`, category && readable(category)]
+            .filter(Boolean)
+            .join(" in ")}
+          .
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setQuery("");
+            setCategory("");
+          }}
+          className="mt-8 rounded-md bg-ink-800 px-3 py-2 text-sm hover:bg-ink-700"
+        >
+            Clear the filter
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!card) {
     const accepted = done.filter((entry) => entry.decision === "accept").length;
     return (
@@ -116,10 +297,13 @@ export function ReviewDeck({ cards }: { cards: ReviewCard[] }) {
             {card.email ? ` · ${card.email}` : " · no email"}
           </p>
         </div>
-        <span className="shrink-0 font-mono text-xs text-ink-400">
-          {index + 1} / {cards.length}
+        <span className="shrink-0 text-right font-mono text-xs text-ink-400">
+          {visible.length} left
+          {away != null && <span className="ml-2 text-signal">{away.toFixed(1)} km</span>}
         </span>
       </header>
+
+      {filterBar}
 
       {card.unverifiedClaims.length > 0 && (
         <div className="shrink-0 border-b border-caution/30 bg-caution/5 px-6 py-2">
