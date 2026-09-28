@@ -296,8 +296,34 @@ img { max-width: 100%; }
 .lang-toggle:hover { opacity: 0.9; }
 .lang-toggle:active { transform: scale(0.98); }
 
-/* Hero */
-.hero { padding: calc(var(--section-space) + 32px) 0 var(--section-space); text-align: ${v.heroLayout === "centered" ? "center" : "left"}; }
+/* Hero
+ *
+ * The fold carries the colour. Previously the accent appeared on one button
+ * and the rest was background, which is the right restraint for a software
+ * product and the wrong one for a business people are meant to feel warm
+ * about. Two commitments, both loud: a wash of the accent, or the accent
+ * itself with the type inverted on top.
+ */
+.hero {
+  ${
+    v.heroStyle === "solid"
+      ? `--hero-bg: var(--accent);
+  --hero-ink: var(--accent-text);
+  /*
+   * Full strength, not a faded tint. A muted colour on top of a saturated
+   * accent measured 3.65:1, under the 4.5 that 18px body and a 12px eyebrow
+   * need. Hierarchy comes from size and weight instead, which costs nothing.
+   */
+  --hero-muted: var(--accent-text);`
+      : `--hero-bg: color-mix(in oklab, var(--accent) ${p.scheme === "dark" ? 34 : 20}%, var(--bg));
+  --hero-ink: var(--text);
+  --hero-muted: var(--muted);`
+  }
+  background: var(--hero-bg);
+  color: var(--hero-ink);
+  padding: calc(var(--section-space) + 40px) 0 calc(var(--section-space) + 8px);
+  text-align: ${v.heroLayout === "centered" ? "center" : "left"};
+}
 .hero-inner { max-width: 680px; ${v.heroLayout === "centered" ? "margin: 0 auto;" : ""} }
 .hero-split { display: grid; gap: 32px; align-items: end; }
 @media (min-width: 900px) {
@@ -305,10 +331,12 @@ img { max-width: 100%; }
   .hero-split .hero-inner { max-width: none; }
 }
 .hero-card {
-  padding: 24px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px; border-radius: var(--radius);
+  border: 1px solid color-mix(in oklab, var(--hero-ink) 20%, transparent);
+  background: color-mix(in oklab, var(--hero-ink) 8%, transparent);
+  color: var(--hero-ink);
 }
-.hero-card dt { font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.hero-card dt { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--hero-muted); }
 .hero-card dd { margin: 4px 0 16px; font-size: 16px; line-height: 24px; overflow-wrap: anywhere; }
 .hero-card dd:last-child { margin-bottom: 0; }
 
@@ -333,9 +361,26 @@ img { max-width: 100%; }
 .emblem-rule { gap: 12px; font-size: 14px; letter-spacing: 0.2em; }
 .emblem-rule::after { content: ""; width: 40px; height: 1px; background: var(--accent); }
 
+.hero .emblem { color: var(--hero-ink); }
+.hero .emblem-circle, .hero .emblem-square {
+  border-color: color-mix(in oklab, var(--hero-ink) 38%, transparent);
+  background: color-mix(in oklab, var(--hero-ink) 8%, transparent);
+}
+.hero .emblem-rule::after { background: var(--hero-ink); }
+
+/*
+ * A business's own logo was drawn for whatever background they had in mind,
+ * usually white. Dropped straight onto a saturated hero it fights the colour,
+ * so it gets a neutral plate to sit on and reads as intended.
+ */
 .emblem-logo img {
   max-height: 76px; max-width: 240px; width: auto; height: auto;
   object-fit: contain; border-radius: var(--radius);
+}
+.hero .emblem-logo img {
+  background: #FFFFFF;
+  padding: 10px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
 }
 /* The generated emblem waits behind a hotlinked logo, in case it never loads. */
 .emblem-fallback { display: none; margin-bottom: 0; }
@@ -345,22 +390,25 @@ img { max-width: 100%; }
 /* Category as atmosphere: a large, faint glyph behind the hero. */
 .hero { position: relative; overflow: hidden; }
 .watermark {
-  position: absolute; right: -110px; bottom: -130px;
-  color: var(--accent); opacity: 0.06; pointer-events: none; line-height: 0;
+  position: absolute; right: -90px; bottom: -120px;
+  color: var(--hero-ink); opacity: 0.13; pointer-events: none; line-height: 0;
+  transform: rotate(-8deg);
 }
-@media (max-width: 767px) { .watermark { right: -190px; bottom: -170px; opacity: 0.045; } }
+@media (max-width: 767px) { .watermark { right: -150px; bottom: -150px; opacity: 0.1; } }
 .eyebrow {
-  font-size: 12px; line-height: 16px; font-weight: 600;
-  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  font-size: 12px; line-height: 16px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--hero-muted);
   margin: 0 0 16px;
 }
 .hero h1 {
-  margin: 0; font-size: ${hero.mobile}px; line-height: 1; font-weight: 600;
-  text-wrap: balance;
-  background: linear-gradient(90deg, ${p.headingFrom}, ${p.headingTo});
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin: 0; font-size: ${hero.mobile}px; line-height: 1.02; font-weight: 700;
+  letter-spacing: -0.02em; text-wrap: balance;
+  color: var(--hero-ink);
 }
-.hero p.sub { margin: 24px 0 0; font-size: 18px; line-height: 28px; color: var(--muted); text-wrap: balance; }
+.hero p.sub {
+  margin: 24px 0 0; font-size: 18px; line-height: 28px; font-weight: 500;
+  color: var(--hero-muted); text-wrap: balance;
+}
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; ${template.heroAlign === "center" ? "justify-content: center;" : ""} }
 .btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -371,6 +419,12 @@ img { max-width: 100%; }
 .btn svg { width: 20px; height: 20px; fill: currentColor; }
 .btn-primary { background: var(--accent); color: var(--accent-text); }
 .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+/* Inside the hero the accent is the backdrop, so the buttons invert onto it. */
+.hero .btn-primary { background: var(--hero-ink); color: var(--hero-bg); }
+.hero .btn-secondary {
+  background: transparent; color: var(--hero-ink);
+  border: 1px solid color-mix(in oklab, var(--hero-ink) 35%, transparent);
+}
 .btn:hover { opacity: 0.9; }
 .btn:active { transform: translateY(1px); }
 
@@ -378,13 +432,16 @@ img { max-width: 100%; }
 .section { padding: var(--section-space) 0; }
 .section-title {
   margin: 0 0 32px; font-size: 12px; line-height: 16px; font-weight: 600;
-  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
   ${v.ruledSections ? "padding-bottom: 12px; border-bottom: 1px solid var(--border);" : ""}
 }
 .prose { max-width: 680px; margin: 0; font-size: 18px; line-height: 28px; }
 
 /* The large-type statement — its own moment, not stacked under the hero. */
-.statement { padding: calc(var(--section-space) + 16px) 0; }
+.statement {
+  padding: calc(var(--section-space) + 24px) 0;
+  background: color-mix(in oklab, var(--accent) ${p.scheme === "dark" ? 22 : 13}%, var(--bg));
+}
 .statement p {
   margin: 0; max-width: 680px;
   font-size: 36px; line-height: 40px; font-weight: 600; text-wrap: balance;
@@ -394,6 +451,7 @@ img { max-width: 100%; }
   transition: color 700ms var(--ease);
 }
 .statement .word.on { color: var(--text); }
+.statement .section-title { color: color-mix(in oklab, var(--accent) 70%, var(--text)); }
 
 .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .card {
@@ -617,11 +675,13 @@ function statementBlock(content: SiteContent): string {
   if (!content.statement) return "";
 
   return `
-    <section class="statement wrap">
-      <p>
-        <span data-lang="el">${statementWords(content.statement.el)}</span>
-        <span data-lang="en">${statementWords(content.statement.en)}</span>
-      </p>
+    <section class="statement">
+      <div class="wrap">
+        <p>
+          <span data-lang="el">${statementWords(content.statement.el)}</span>
+          <span data-lang="en">${statementWords(content.statement.en)}</span>
+        </p>
+      </div>
     </section>`;
 }
 
@@ -725,8 +785,8 @@ export function renderSite({ content, template, category, variation, slug, price
   const watermark = renderWatermark(category, content.businessName);
 
   const hero = heroCard
-    ? `<header class="hero wrap">${watermark}<div class="hero-split"><div class="hero-inner">${heroBody}</div>${heroCard}</div></header>`
-    : `<header class="hero wrap">${watermark}<div class="hero-inner">${heroBody}</div></header>`;
+    ? `<header class="hero">${watermark}<div class="wrap"><div class="hero-split"><div class="hero-inner">${heroBody}</div>${heroCard}</div></div></header>`
+    : `<header class="hero">${watermark}<div class="wrap"><div class="hero-inner">${heroBody}</div></div></header>`;
 
   /*
    * The offer, shown only on preview builds. It sits at the bottom rather than

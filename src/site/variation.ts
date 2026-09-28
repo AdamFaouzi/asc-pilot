@@ -21,6 +21,15 @@ export type MonogramStyle = "circle" | "square" | "rule" | "none";
 
 export type Rhythm = "tight" | "airy";
 
+/**
+ * How much colour the hero commits to.
+ *
+ * Both options are deliberately loud. The previous design put the accent on a
+ * single button and left the rest of the fold white, which reads as a software
+ * company rather than a taverna.
+ */
+export type HeroStyle = "tint" | "solid";
+
 export interface Variation {
   accent: string;
   accentText: string;
@@ -28,6 +37,7 @@ export interface Variation {
   typeScale: TypeScale;
   monogram: MonogramStyle;
   rhythm: Rhythm;
+  heroStyle: HeroStyle;
   /** Draw a hairline rule under section titles. */
   ruledSections: boolean;
 }
@@ -55,6 +65,7 @@ const TYPE_SCALES: TypeScale[] = ["compact", "balanced", "display"];
  */
 const MONOGRAMS: MonogramStyle[] = ["circle", "square", "rule"];
 const RHYTHMS: Rhythm[] = ["tight", "airy"];
+const HERO_STYLES: HeroStyle[] = ["tint", "solid"];
 
 export function variationFor(slug: string, template: Template): Variation {
   const accent = pick(slug, "accent", template.accents);
@@ -67,6 +78,7 @@ export function variationFor(slug: string, template: Template): Variation {
     typeScale: pick(slug, "type", TYPE_SCALES),
     monogram: pick(slug, "monogram", MONOGRAMS),
     rhythm: pick(slug, "rhythm", RHYTHMS),
+    heroStyle: pick(slug, "heroStyle", HERO_STYLES),
     ruledSections: hash(`${slug}::ruled`) % 2 === 0,
   };
 }
