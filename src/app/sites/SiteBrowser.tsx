@@ -37,6 +37,29 @@ const STATUS_DOT: Record<string, string> = {
   FAILED: "bg-alarm",
 };
 
+/**
+ * The states worth looking at as a group. "Approved" is the one that answers a
+ * real question — which sites can actually be sold right now — because
+ * checkout refuses anything a human has not reviewed.
+ */
+const VIEWS = [
+  { key: "all", label: "All", test: () => true },
+  {
+    key: "approved",
+    label: "Approved",
+    test: (e: SiteEntry) => e.reviewed && e.status === "PREVIEW",
+  },
+  { key: "live", label: "Live", test: (e: SiteEntry) => e.status === "LIVE" },
+  {
+    key: "unreviewed",
+    label: "Unreviewed",
+    test: (e: SiteEntry) => !e.reviewed && e.status === "PREVIEW",
+  },
+  { key: "needs_work", label: "Needs work", test: (e: SiteEntry) => e.status === "NEEDS_WORK" },
+] as const;
+
+type ViewKey = (typeof VIEWS)[number]["key"];
+
 function matches(entry: SiteEntry, query: string): boolean {
   if (!query) return true;
   const haystack = [
@@ -61,15 +84,26 @@ function matches(entry: SiteEntry, query: string): boolean {
 
 export function SiteBrowser({ sites }: { sites: SiteEntry[] }) {
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<ViewKey>("all");
   const [index, setIndex] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const visible = useMemo(() => sites.filter((site) => matches(site, query)), [sites, query]);
+  const test = VIEWS.find((v) => v.key === view)!.test;
+  const visible = useMemo(
+    () => sites.filter((site) => test(site) && matches(site, query)),
+    [sites, query, test],
+  );
+
+  // Shown on the chips, so the counts are visible without clicking through.
+  const counts = useMemo(
+    () => Object.fromEntries(VIEWS.map((v) => [v.key, sites.filter(v.test).length])) as Record<ViewKey, number>,
+    [sites],
+  );
   const current = visible[Math.min(index, visible.length - 1)];
 
   // A narrowing search shouldn't leave the selection pointing off the end.
-  useEffect(() => setIndex(0), [query]);
+  useEffect(() => setIndex(0), [query, view]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -126,13 +160,31 @@ export function SiteBrowser({ sites }: { sites: SiteEntry[] }) {
         <span className="font-mono text-xs text-ink-700">
           {visible.length} of {sites.length}
         </span>
-        <Link href="/logos" className="text-xs text-ink-400 hover:text-ink-200">
-          Logos →
-        </Link>
-        <Link href="/review" className="text-xs text-signal hover:opacity-80">
-          Review queue →
-        </Link>
       </header>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-ink-800 px-6 py-2">
+        {VIEWS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            onClick={() => setView(entry.key)}
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${
+              view === entry.key ? "bg-ink-800 text-ink-200" : "text-ink-400 hover:text-ink-200"
+            }`}
+          >
+            {entry.label}
+            <span className="ml-1.5 font-mono text-ink-700">{counts[entry.key]}</span>
+          </button>
+        ))}
+        <span className="ml-auto flex gap-4">
+          <Link href="/logos" className="text-xs text-ink-400 hover:text-ink-200">
+            Logos →
+          </Link>
+          <Link href="/review" className="text-xs text-signal hover:opacity-80">
+            Review queue →
+          </Link>
+        </span>
+      </div>
 
       <div className="flex min-h-0 flex-1">
         <ul
@@ -140,7 +192,9 @@ export function SiteBrowser({ sites }: { sites: SiteEntry[] }) {
           className="w-72 shrink-0 overflow-y-auto border-r border-ink-800"
         >
           {visible.length === 0 && (
-            <li className="px-4 py-6 text-sm text-ink-700">No site matches “{query}”.</li>
+            <li className="px-4 py-6 text-sm text-ink-700">
+              {query ? `No site matches “${query}”.` : "Nothing in this view yet."}
+            </li>
           )}
           {visible.map((site, position) => {
             const selected = site.slug === current?.slug;
