@@ -315,9 +315,14 @@ img { max-width: 100%; }
    * need. Hierarchy comes from size and weight instead, which costs nothing.
    */
   --hero-muted: var(--accent-text);`
-      : `--hero-bg: color-mix(in oklab, var(--accent) ${p.scheme === "dark" ? 34 : 20}%, var(--bg));
+      : `--hero-bg: color-mix(in oklab, var(--accent) ${p.scheme === "dark" ? 34 : 38}%, var(--bg));
   --hero-ink: var(--text);
-  --hero-muted: var(--muted);`
+  /*
+   * Full strength here too. --muted is tuned against the page background;
+   * on a tinted hero it measured 3.22:1, under the 4.5 that 18px body and a
+   * 12px eyebrow need.
+   */
+  --hero-muted: var(--text);`
   }
   background: var(--hero-bg);
   color: var(--hero-ink);
@@ -432,7 +437,8 @@ img { max-width: 100%; }
 .section { padding: var(--section-space) 0; }
 .section-title {
   margin: 0 0 32px; font-size: 12px; line-height: 16px; font-weight: 600;
-  letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: color-mix(in oklab, var(--accent) 62%, var(--text));
   ${v.ruledSections ? "padding-bottom: 12px; border-bottom: 1px solid var(--border);" : ""}
 }
 .prose { max-width: 680px; margin: 0; font-size: 18px; line-height: 28px; }
@@ -451,7 +457,7 @@ img { max-width: 100%; }
   transition: color 700ms var(--ease);
 }
 .statement .word.on { color: var(--text); }
-.statement .section-title { color: color-mix(in oklab, var(--accent) 70%, var(--text)); }
+.statement .section-title { color: color-mix(in oklab, var(--accent) 62%, var(--text)); }
 
 .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .card {

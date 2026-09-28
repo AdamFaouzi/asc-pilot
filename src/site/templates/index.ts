@@ -130,7 +130,7 @@ export const TEMPLATES: Template[] = [
     suits: ["automotive_repair", "car_wash", "gas_station", "hardware_store", "locksmith", "electrician", "plumber", "gym"],
     accents: [
       { value: "#E5A93C", on: "#131209" },
-      { value: "#C7523B", on: "#FFFFFF" },
+      { value: "#B94C37", on: "#FFFFFF" },
       { value: "#5B8FA8", on: "#131209" },
       { value: "#8FA83C", on: "#131209" },
     ],
@@ -155,8 +155,8 @@ export const TEMPLATES: Template[] = [
     suits: ["hotel", "guest_house", "hostel", "travel_agency", "bar", "ice_cream_shop", "wine_bar", "music_venue", "lounge", "beach_bar", "karaoke_venue"],
     accents: [
       { value: "#2C6E8F", on: "#FFFFFF" },
-      { value: "#3E8C86", on: "#FFFFFF" },
-      { value: "#C58A4E", on: "#FFFFFF" },
+      { value: "#367A75", on: "#FFFFFF" },
+      { value: "#92663A", on: "#FFFFFF" },
     ],
     palette: {
       scheme: "light",
@@ -180,7 +180,7 @@ export const TEMPLATES: Template[] = [
     accents: [
       { value: "#3F7A3F", on: "#FFFFFF" },
       { value: "#B5452C", on: "#FFFFFF" },
-      { value: "#9A7A1F", on: "#FFFFFF" },
+      { value: "#886B1B", on: "#FFFFFF" },
     ],
     palette: {
       scheme: "light",
