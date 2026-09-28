@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { generateSites } from "@/pipeline/generation";
-import {
-  addSuppression,
-  disqualifyLead,
-  restoreLead,
-  retryOutreach,
-  updateSiteContent,
-} from "@/pipeline/ops";
+import { addSuppression, disqualifyLead, publishRevision, restoreLead, retryOutreach, updateSiteContent } from "@/pipeline/ops";
 import { reviewSite } from "@/pipeline/review";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +45,11 @@ export async function POST(
           typeof body.note === "string" ? body.note : undefined,
         );
         return NextResponse.json({ ok: true, ...result });
+      }
+
+      case "publish": {
+        const url = await publishRevision(slug);
+        return NextResponse.json({ ok: true, url });
       }
 
       case "edit": {

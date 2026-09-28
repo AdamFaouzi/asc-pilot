@@ -12,6 +12,10 @@ import type { Localized } from "@/core/types";
  * templates, so an edit can't produce a broken page. Saving re-renders and
  * redeploys, and deliberately clears the review flag: the page changed, so the
  * previous approval no longer describes what's there.
+ *
+ * On a live site the save creates a new version rather than altering the page
+ * a customer is paying for. It goes through review like anything else, then
+ * Publish puts it over the live one.
  */
 
 interface Fields {
@@ -34,13 +38,14 @@ export function SiteEditor({
   slug,
   siteId,
   initial,
-  disabled,
+  live,
   facebookId,
 }: {
   slug: string;
   siteId: string;
   initial: Fields & { logoUrl?: string; gallery?: string[] };
-  disabled?: boolean;
+  /** The page a customer is paying for, so a save becomes a new version. */
+  live?: boolean;
   /** Numeric Facebook page id, when the business has one listed. */
   facebookId?: string;
 }) {
@@ -82,14 +87,6 @@ export function SiteEditor({
     } finally {
       setBusy(false);
     }
-  }
-
-  if (disabled) {
-    return (
-      <p className="text-xs text-ink-700">
-        This site is live. Editing a paying customer&rsquo;s page needs a fresh version.
-      </p>
-    );
   }
 
   if (!open) {

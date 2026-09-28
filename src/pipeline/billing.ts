@@ -149,7 +149,7 @@ export async function activateSubscription(subscription: Stripe.Subscription): P
   });
 
   if (status === "ACTIVE" || status === "TRIALING") {
-    await goLive(lead.id);
+    await promoteToLive(lead.id);
   } else if (status === "CANCELED" || status === "UNPAID") {
     await takeDown(lead.id, status);
   }
@@ -157,8 +157,14 @@ export async function activateSubscription(subscription: Stripe.Subscription): P
   logger.info("billing.subscription_synced", { slug, status, amountCents, currency });
 }
 
-/** Serves the reviewed preview build from the live environment. */
-async function goLive(leadId: string): Promise<void> {
+/**
+ * Serves the reviewed preview build from the live environment.
+ *
+ * Exported because promotion is no longer only a consequence of paying: a
+ * customer who asks for their opening hours to change gets a new version,
+ * reviewed like any other, and this is what publishes it over the old one.
+ */
+export async function promoteToLive(leadId: string): Promise<void> {
   const lead = await prisma.lead.findUniqueOrThrow({
     where: { id: leadId },
     include: {
@@ -216,6 +222,11 @@ async function goLive(leadId: string): Promise<void> {
   const deployment = await hosting.deploy(target, { "index.html": html });
 
   await prisma.$transaction([
+    // Whatever was live is now the previous version, not a second live one.
+    prisma.generatedSite.updateMany({
+      where: { leadId, status: "LIVE", id: { not: site.id } },
+      data: { status: "ARCHIVED", liveUrl: null },
+    }),
     prisma.generatedSite.update({
       where: { id: site.id },
       data: { status: "LIVE", liveUrl: deployment.url, html, deployedAt: new Date() },

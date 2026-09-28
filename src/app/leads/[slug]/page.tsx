@@ -8,6 +8,7 @@ import { leadDetail } from "@/pipeline/ops";
 
 import { LeadActions } from "./LeadActions";
 import { SiteEditor } from "./SiteEditor";
+import { PublishRevision } from "./PublishRevision";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,17 @@ export default async function LeadPage({ params }: { params: Promise<{ slug: str
   if (!lead) notFound();
 
   const site = lead.sites[0];
+
+  /*
+   * A reviewed revision waiting behind a live page. Only meaningful while the
+   * subscription is running; otherwise there is nothing to publish over.
+   */
+  const paying =
+    lead.subscription?.status === "ACTIVE" || lead.subscription?.status === "TRIALING";
+  const pendingRevision =
+    paying && lead.sites.some((entry) => entry.status === "LIVE")
+      ? lead.sites.find((entry) => entry.status === "PREVIEW" && entry.reviewedByHuman)
+      : undefined;
   const content = site?.content as SiteContent | null;
   const evidence = lead.business.websiteEvidence as { reasons?: string[] } | null;
   const failed = lead.outreach.find((message) => message.status === "FAILED");
@@ -187,12 +199,21 @@ export default async function LeadPage({ params }: { params: Promise<{ slug: str
           </ul>
         )}
 
+        {pendingRevision && (
+          <PublishRevision slug={lead.slug} version={pendingRevision.version} />
+        )}
+
         {site && content && (
           <div className="mt-4">
             <SiteEditor
               slug={lead.slug}
               siteId={site.id}
-              disabled={site.status === "LIVE"}
+              /*
+               * A live site is editable now: the edit becomes a new version
+               * and the customer's page keeps serving until that version is
+               * reviewed and published.
+               */
+              live={site.status === "LIVE"}
               facebookId={
                 lead.business.contacts
                   .find((contact) => contact.channel === "FACEBOOK")

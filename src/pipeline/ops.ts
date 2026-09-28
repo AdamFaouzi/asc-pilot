@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { asJson } from "@/lib/json";
 import { logger } from "@/lib/logger";
 import { getPlan } from "@/providers/billing";
+import { promoteToLive } from "./billing";
 import { getHostingProvider } from "@/providers/hosting";
 import { renderSite } from "@/site/render";
 import { pickTemplate, templateByKey } from "@/site/templates";
@@ -88,12 +89,18 @@ export async function updateSiteContent(
 ) {
   const site = await prisma.generatedSite.findUniqueOrThrow({
     where: { id: siteId },
-    include: { lead: { select: { slug: true, status: true, business: { select: { primaryCategory: true } } } } },
+    include: {
+      lead: {
+        select: {
+          id: true,
+          slug: true,
+          status: true,
+          business: { select: { primaryCategory: true } },
+          sites: { orderBy: { version: "desc" }, take: 1, select: { version: true } },
+        },
+      },
+    },
   });
-
-  if (site.status === "LIVE") {
-    throw new Error("This site is live — edits to a paying customer's site need a fresh version");
-  }
 
   const current = site.content as SiteContent | null;
   if (!current) throw new Error("This site has no stored content to edit");
@@ -136,6 +143,46 @@ export async function updateSiteContent(
   });
 
   const deployment = await hosting.deploy(target, { "index.html": html });
+
+  /*
+   * A live site is never edited in place. The business is paying for the page
+   * that is up, and an edit has not been reviewed yet, so changing it directly
+   * would put unreviewed copy in front of their customers the moment it saved.
+   * The edit becomes a new version instead: the live page carries on serving
+   * until someone reviews the new one and publishes it.
+   */
+  if (site.status === "LIVE") {
+    const revision = await prisma.generatedSite.create({
+      data: {
+        leadId: site.lead.id,
+        version: (site.lead.sites[0]?.version ?? site.version) + 1,
+        status: "PREVIEW",
+        template: site.template,
+        // Carried from the version being edited: the revision is the same
+        // page with a change, not a fresh generation.
+        generator: site.generator,
+        generatorModel: site.generatorModel,
+        hostingProvider: deployment.provider,
+        deploymentId: deployment.deploymentId,
+        content: asJson(content),
+        html,
+        previewUrl: deployment.url,
+        assets: site.assets ?? undefined,
+        generatedAt: site.generatedAt,
+        deployedAt: new Date(),
+        editedByHuman: true,
+        reviewedByHuman: false,
+      },
+    });
+
+    logger.info("ops.revision_created", {
+      slug: site.lead.slug,
+      from: site.id,
+      revision: revision.id,
+      version: revision.version,
+    });
+    return deployment.url;
+  }
 
   await prisma.generatedSite.update({
     where: { id: site.id },
@@ -201,6 +248,46 @@ export async function addSuppression(email: string, note?: string) {
   });
 
   logger.info("ops.suppressed", { email: address, note });
+}
+
+/**
+ * Publishes a reviewed revision over a paying customer's live site.
+ *
+ * Editing a live site creates a new version rather than changing the page in
+ * place, so something has to put the reviewed result live. Payment already
+ * happened, so this cannot go through the Stripe webhook that promoted the
+ * first version.
+ *
+ * The same gate as everywhere else applies: unreviewed copy never reaches a
+ * real business's customers.
+ */
+export async function publishRevision(slug: string): Promise<string> {
+  const lead = await prisma.lead.findUniqueOrThrow({
+    where: { slug },
+    include: {
+      subscription: true,
+      sites: { where: { status: "PREVIEW" }, orderBy: { version: "desc" }, take: 1 },
+    },
+  });
+
+  const status = lead.subscription?.status;
+  if (status !== "ACTIVE" && status !== "TRIALING") {
+    throw new Error("Only a paying customer's site can be republished");
+  }
+
+  const revision = lead.sites[0];
+  if (!revision) throw new Error("No revision waiting to publish");
+  if (!revision.reviewedByHuman) throw new Error("This revision has not been approved yet");
+
+  await promoteToLive(lead.id);
+
+  const published = await prisma.generatedSite.findUniqueOrThrow({
+    where: { id: revision.id },
+    select: { liveUrl: true },
+  });
+
+  logger.info("ops.revision_published", { slug, siteId: revision.id, version: revision.version });
+  return published.liveUrl ?? "";
 }
 
 /** Everything about one lead, for the drill-down view. */

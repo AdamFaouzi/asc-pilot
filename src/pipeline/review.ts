@@ -38,7 +38,16 @@ export async function reviewSite(
       }),
       prisma.lead.update({
         where: { id: site.leadId },
-        data: { status: "APPROVED", approvedAt: now, reviewReason: null },
+        /*
+         * A paying customer stays converted. Reviewing a revision of their
+         * live site would otherwise walk the lead backwards to APPROVED,
+         * dropping them out of the paying count while their subscription is
+         * still running.
+         */
+        data:
+          site.lead.status === "CONVERTED"
+            ? { reviewReason: null }
+            : { status: "APPROVED", approvedAt: now, reviewReason: null },
       }),
     ]);
 
@@ -61,8 +70,10 @@ export async function reviewSite(
     }),
     prisma.lead.update({
       where: { id: site.leadId },
+      // Same reasoning as accept: rejecting a revision must not unwind the
+      // customer. Their live site is unaffected; only the revision is.
       data: {
-        status: "NEEDS_REVIEW",
+        ...(site.lead.status === "CONVERTED" ? {} : { status: "NEEDS_REVIEW" }),
         reviewReason: `Site needs work: ${note?.trim() || "flagged in review"}`,
       },
     }),
