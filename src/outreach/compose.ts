@@ -24,12 +24,14 @@ export interface ComposeInput {
   fromName: string;
   replyTo?: string;
   postalAddress: string;
+  /** Optional: a business that would rather ring than reply. */
+  phone?: string;
   unsubscribeUrl: string;
   priceLabel: string;
   priceLabelEl: string;
 }
 
-export const TEMPLATE_ID = "preview-offer-v1";
+export const TEMPLATE_ID = "preview-offer-v2";
 
 export function composeOutreach(input: ComposeInput): OutreachEmail {
   const subject = `${input.businessName} — μια έτοιμη ιστοσελίδα / a website, ready to see`;
@@ -40,7 +42,11 @@ export function composeOutreach(input: ComposeInput): OutreachEmail {
 
 ${input.previewUrl}
 
-Είναι πραγματική και ολοκληρωμένη — όχι δείγμα. Αν σας αρέσει, τη βγάζω online για ${input.priceLabelEl}. Αν όχι, δεν χρειάζεται να κάνετε τίποτα και δεν θα ξαναλάβετε μήνυμα.
+Είναι πραγματική και ολοκληρωμένη — όχι δείγμα. Αν σας αρέσει, τη βγάζω online για ${input.priceLabelEl}. Σε αυτά περιλαμβάνονται η φιλοξενία και οι αλλαγές που θα χρειαστείτε, όπως ωράριο, τηλέφωνο ή φωτογραφίες. Ακυρώνετε όποτε θέλετε.
+
+Αν όχι, δεν χρειάζεται να κάνετε τίποτα και δεν θα ξαναλάβετε μήνυμα.${input.phone ? `
+
+Αν προτιμάτε να μιλήσουμε, τηλεφωνήστε μου στο ${input.phone}.` : ""}
 
 Τα στοιχεία σας τα βρήκα σε δημόσιους καταλόγους επιχειρήσεων.
 
@@ -57,7 +63,11 @@ I noticed ${input.businessName} doesn't have a website, so I built one. You can 
 
 ${input.previewUrl}
 
-It's a real, finished page — not a mock-up. If you like it, I'll put it online for ${input.priceLabel}. If not, you don't need to do anything, and you won't hear from me again.
+It's a real, finished page — not a mock-up. If you like it, I'll put it online for ${input.priceLabel}. That covers the hosting and any changes you need along the way, like opening hours, a phone number or photos. You can cancel any month.
+
+If not, you don't need to do anything, and you won't hear from me again.${input.phone ? `
+
+If you would rather talk, call me on ${input.phone}.` : ""}
 
 I found your details in public business listings.
 
@@ -73,13 +83,17 @@ Unsubscribe: ${input.unsubscribeUrl}
 <p>Καλησπέρα,</p>
 <p>Είδα ότι η <strong>${escapeHtml(input.businessName)}</strong> δεν έχει ιστοσελίδα, οπότε έφτιαξα μία και μπορείτε να τη δείτε εδώ:</p>
 <p><a href="${escapeHtml(input.previewUrl)}" style="color:#1B6E8C;">${escapeHtml(input.previewUrl)}</a></p>
-<p>Είναι πραγματική και ολοκληρωμένη — όχι δείγμα. Αν σας αρέσει, τη βγάζω online για <strong>${escapeHtml(input.priceLabelEl)}</strong>. Αν όχι, δεν χρειάζεται να κάνετε τίποτα και δεν θα ξαναλάβετε μήνυμα.</p>
+<p>Είναι πραγματική και ολοκληρωμένη — όχι δείγμα. Αν σας αρέσει, τη βγάζω online για <strong>${escapeHtml(input.priceLabelEl)}</strong>. Σε αυτά περιλαμβάνονται η φιλοξενία και οι αλλαγές που θα χρειαστείτε, όπως ωράριο, τηλέφωνο ή φωτογραφίες. Ακυρώνετε όποτε θέλετε.</p>
+<p>Αν όχι, δεν χρειάζεται να κάνετε τίποτα και δεν θα ξαναλάβετε μήνυμα.</p>${input.phone ? `
+<p>Αν προτιμάτε να μιλήσουμε, τηλεφωνήστε μου στο <a href="tel:${escapeHtml(input.phone.replace(/\s+/g, ""))}" style="color:#1B6E8C;">${escapeHtml(input.phone)}</a>.</p>` : ""}
 <p style="color:#666;font-size:13px;">Τα στοιχεία σας τα βρήκα σε δημόσιους καταλόγους επιχειρήσεων.</p>
 <hr style="border:0;border-top:1px solid #e5e5e5;margin:24px 0;">
 <p>Hello,</p>
 <p>I noticed <strong>${escapeHtml(input.businessName)}</strong> doesn't have a website, so I built one. You can see it here:</p>
 <p><a href="${escapeHtml(input.previewUrl)}" style="color:#1B6E8C;">${escapeHtml(input.previewUrl)}</a></p>
-<p>It's a real, finished page — not a mock-up. If you like it, I'll put it online for <strong>${escapeHtml(input.priceLabel)}</strong>. If not, you don't need to do anything, and you won't hear from me again.</p>
+<p>It's a real, finished page — not a mock-up. If you like it, I'll put it online for <strong>${escapeHtml(input.priceLabel)}</strong>. That covers the hosting and any changes you need along the way, like opening hours, a phone number or photos. You can cancel any month.</p>
+<p>If not, you don't need to do anything, and you won't hear from me again.</p>${input.phone ? `
+<p>If you would rather talk, call me on <a href="tel:${escapeHtml(input.phone.replace(/\s+/g, ""))}" style="color:#1B6E8C;">${escapeHtml(input.phone)}</a>.</p>` : ""}
 <p style="color:#666;font-size:13px;">I found your details in public business listings.</p>
 <hr style="border:0;border-top:1px solid #e5e5e5;margin:24px 0;">
 <p style="color:#666;font-size:12px;">

@@ -82,6 +82,8 @@ const schema = z.object({
   OUTREACH_REPLY_TO: optional(z.email()),
   /** Postal address required in commercial email under EU/ePrivacy rules. */
   OUTREACH_POSTAL_ADDRESS: optionalString,
+  /** Shown in the outreach email so a business can ring instead of replying. */
+  OUTREACH_PHONE: optionalString,
   /** Signs unsubscribe tokens so opt-out links can't be forged or enumerated. */
   UNSUBSCRIBE_SECRET: optionalString,
 

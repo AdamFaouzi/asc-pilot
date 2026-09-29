@@ -288,6 +288,7 @@ async function sendToLead(leadId: string, dryRun: boolean) {
     fromName: env.OUTREACH_FROM_NAME,
     replyTo: env.OUTREACH_REPLY_TO,
     postalAddress,
+    phone: env.OUTREACH_PHONE,
     unsubscribeUrl: unsubscribe,
     priceLabel: plan.displayPrice,
     priceLabelEl: plan.displayPriceEl,
