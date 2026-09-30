@@ -29,6 +29,8 @@ export interface WebsiteEvidence {
   emailDomains?: string[];
   /** Domains that answered an HTTP request. */
   liveDomains?: string[];
+  /** Domains guessed from the business name and tried. */
+  guessedDomains?: string[];
   socials?: string[];
   probedAt?: string;
 }
@@ -205,9 +207,15 @@ export interface ProbeResult {
   domain: string;
   outcome: ProbeOutcome;
   status?: number;
+  /** Start of the page, when the caller asked for it. */
+  body?: string;
 }
 
-export async function probeDomain(domain: string, timeoutMs: number): Promise<ProbeResult> {
+export async function probeDomain(
+  domain: string,
+  timeoutMs: number,
+  capture = false,
+): Promise<ProbeResult> {
   let sawResponse: number | undefined;
 
   for (const url of [`https://${domain}`, `http://${domain}`]) {
@@ -227,7 +235,15 @@ export async function probeDomain(domain: string, timeoutMs: number): Promise<Pr
         },
       });
 
-      if (response.ok) return { domain, outcome: "live", status: response.status };
+      if (response.ok) {
+        let body: string | undefined;
+        if (capture) {
+          // Enough to find a business name or a phone number in; not enough
+          // to be worth streaming a whole site into memory.
+          body = (await response.text()).slice(0, 40_000);
+        }
+        return { domain, outcome: "live", status: response.status, body };
+      }
 
       // A server answered. Remember it and try the other scheme.
       sawResponse = response.status;
@@ -247,6 +263,101 @@ export async function probeDomain(domain: string, timeoutMs: number): Promise<Pr
  * Full check: offline classification, then an HTTP probe for the UNKNOWN cases
  * where a custom email domain might or might not host a site.
  */
+/**
+ * Words that say what a business is rather than which business it is. Dropped
+ * when guessing a domain, because nobody registers `thegymlimited.com.cy`.
+ */
+const NOISE = new Set([
+  "the", "and", "of", "at", "in", "ltd", "limited", "co", "cy", "cyprus",
+  "restaurant", "taverna", "tavern", "cafe", "coffee", "bar", "pub", "shop",
+  "store", "studio", "centre", "center", "clinic", "salon", "hair", "gym",
+  "fitness", "personal", "training", "boutique", "house", "club", "school",
+  "academy", "services", "service", "group", "company",
+]);
+
+/** Latin letters and digits only: a Greek name gives no usable domain guess. */
+function latinTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Domains a business of this name might plausibly own.
+ *
+ * Guesses, not facts. A hit is only ever acted on when the page itself
+ * corroborates it, because `forma.com` belongs to somebody, just probably not
+ * to a personal training studio in Paphos.
+ */
+export function candidateDomains(name: string): string[] {
+  const tokens = latinTokens(name);
+  if (tokens.length === 0) return [];
+
+  const meaningful = tokens.filter((token) => !NOISE.has(token) && token.length > 1);
+  if (meaningful.length === 0) return [];
+
+  const stems = new Set<string>();
+  const all = tokens.join("");
+  if (all.length <= 24) stems.add(all);
+  stems.add(meaningful.join(""));
+  if (meaningful.length > 1) stems.add(meaningful.slice(0, 2).join(""));
+  if (meaningful[0]!.length >= 5) stems.add(meaningful[0]!);
+  /*
+   * "Forma Personal Training Studio Gym" is far likelier to be formagym than
+   * formapersonaltraining. The trailing word is usually the category one, and
+   * the category word is exactly what a small business puts in its domain, so
+   * pair it with the distinctive part even when nothing else survived the
+   * noise filter.
+   */
+  const last = tokens[tokens.length - 1]!;
+  if (last !== meaningful[0]) stems.add(`${meaningful[0]}${last}`);
+
+  const out: string[] = [];
+  for (const stem of stems) {
+    if (stem.length < 4 || stem.length > 30) continue;
+    for (const tld of [".com.cy", ".cy", ".com"]) out.push(stem + tld);
+  }
+  return out.slice(0, 12);
+}
+
+/**
+ * Does this page look like it belongs to this business?
+ *
+ * Without this the guess is worthless: plenty of short domains serve a page,
+ * and disqualifying a lead because somebody else owns a similar name would
+ * silently shrink the funnel for no reason.
+ */
+export function corroborates(body: string, place: PlaceResult): string | null {
+  const haystack = body.toLowerCase().replace(/\s+/g, " ");
+
+  const digits = (place.phone ?? "").replace(/\D/g, "");
+  const phoneSeen =
+    digits.length >= 8 && haystack.replace(/\D/g, "").includes(digits.slice(-8));
+  if (phoneSeen) return "page carries the phone number";
+
+  const city = place.address?.city?.toLowerCase();
+  const citySeen = Boolean(city && city.length >= 4 && haystack.includes(city));
+
+  const distinctive = latinTokens(place.name).filter(
+    (token) => !NOISE.has(token) && token.length >= 4,
+  );
+  const named = distinctive.filter((token) => haystack.includes(token));
+
+  /*
+   * Two distinctive words is a business. One is a coincidence: "Forma
+   * Interior Design, Milan" contains "forma" and has nothing to do with a
+   * gym in Paphos. A single match has to be backed by the town before it
+   * disqualifies a lead.
+   */
+  if (named.length >= 2) return `page mentions ${named.slice(0, 3).join(", ")}`;
+  if (named.length === 1 && citySeen) return `page mentions ${named[0]} and the town`;
+
+  return null;
+}
+
 export async function checkWebsite(
   place: PlaceResult,
   options: { probe: boolean; timeoutMs: number },
@@ -264,6 +375,56 @@ export async function checkWebsite(
         },
       };
     }
+
+    /*
+     * A business with no listed site and a free mailbox used to qualify on
+     * nothing more than Overture's silence: there was no domain to probe, so
+     * nothing ever checked. That is how a gym with a website reached the
+     * outreach queue. Guess domains from the name instead.
+     *
+     * A guess only ever disqualifies when the page corroborates it. An
+     * uncorroborated hit means somebody else owns a similar domain, which
+     * says nothing about this business, so the verdict is left alone rather
+     * than sent to manual review.
+     */
+    if (options.probe && (offline.verdict === "SOCIAL_ONLY" || offline.verdict === "NONE")) {
+      const guesses = candidateDomains(place.name);
+
+      for (const domain of guesses) {
+        const result = await probeDomain(domain, options.timeoutMs, true);
+        if (result.outcome !== "live" || !result.body) continue;
+
+        const why = corroborates(result.body, place);
+        if (!why) continue;
+
+        return {
+          verdict: "HAS_WEBSITE",
+          evidence: {
+            ...offline.evidence,
+            guessedDomains: guesses,
+            liveDomains: [domain],
+            probedAt: new Date().toISOString(),
+            reasons: [...offline.evidence.reasons, `Found a site at ${domain} — ${why}`],
+          },
+        };
+      }
+
+      return {
+        ...offline,
+        evidence: {
+          ...offline.evidence,
+          guessedDomains: guesses,
+          probedAt: new Date().toISOString(),
+          reasons: [
+            ...offline.evidence.reasons,
+            guesses.length > 0
+              ? `Tried ${guesses.length} domain(s) from the name; none served a matching page`
+              : "Name gave no usable domain to guess",
+          ],
+        },
+      };
+    }
+
     return offline;
   }
 

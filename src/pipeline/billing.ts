@@ -53,6 +53,15 @@ export async function createCheckoutSession(slug: string): Promise<{ url: string
   });
 
   if (!lead) throw new Error(`No lead for slug "${slug}"`);
+  /*
+   * A lead ruled out after its site was approved stays approved, because
+   * approval describes the page and disqualification describes the business.
+   * Selling to one anyway is the case this guards: the website re-check
+   * disqualified a business whose site a human had already accepted.
+   */
+  if (lead.status === "DISQUALIFIED" || lead.status === "DECLINED") {
+    throw new Error("This business is no longer a candidate");
+  }
   if (lead.subscription?.status === "ACTIVE") {
     throw new Error("This site already has an active subscription");
   }
