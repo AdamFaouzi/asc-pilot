@@ -1,3 +1,5 @@
+import * as dns from "node:dns/promises";
+
 import type { PlaceResult } from "./types";
 
 /**
@@ -315,12 +317,46 @@ export function candidateDomains(name: string): string[] {
   const last = tokens[tokens.length - 1]!;
   if (last !== meaningful[0]) stems.add(`${meaningful[0]}${last}`);
 
+  /*
+   * Wide, because the one that prompted this was on .fit — a gym, so of
+   * course it was. Guessing which ending a business chose is hopeless, and
+   * cheap to get wrong now that DNS filters the list before anything is
+   * fetched: a name that does not resolve costs a few milliseconds.
+   *
+   * Ordered longest stem first, since the specific guess is likelier to be
+   * the business and the generic one likelier to be a stranger.
+   */
+  const TLDS = [
+    ".com.cy", ".cy", ".com", ".net", ".eu", ".org", ".co",
+    ".fit", ".gym", ".studio", ".shop", ".online", ".site", ".gr",
+  ];
+
   const out: string[] = [];
-  for (const stem of stems) {
+  for (const stem of [...stems].sort((a, b) => b.length - a.length)) {
     if (stem.length < 4 || stem.length > 30) continue;
-    for (const tld of [".com.cy", ".cy", ".com"]) out.push(stem + tld);
+    for (const tld of TLDS) out.push(stem + tld);
   }
-  return out.slice(0, 12);
+  return out;
+}
+
+/*
+ * A resolver of our own, with a short timeout and one attempt.
+ *
+ * The default waits several seconds and retries before giving up, which is
+ * right for a name you expect to exist and wrong for a guess: checking one
+ * business took forty seconds, nearly all of it waiting on names that were
+ * never there.
+ */
+const resolver = new dns.Resolver({ timeout: 2000, tries: 1 });
+
+/** Does this name exist at all? Far cheaper than asking for the page. */
+export async function resolves(domain: string): Promise<boolean> {
+  try {
+    const addresses = await resolver.resolve4(domain);
+    return addresses.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -390,7 +426,14 @@ export async function checkWebsite(
     if (options.probe && (offline.verdict === "SOCIAL_ONLY" || offline.verdict === "NONE")) {
       const guesses = candidateDomains(place.name);
 
-      for (const domain of guesses) {
+      // DNS first, in parallel: most guesses do not exist, and finding that
+      // out with a fetch apiece is what made a wider net unaffordable.
+      const resolved = await Promise.all(
+        guesses.map(async (d) => ((await resolves(d)) ? d : null)),
+      );
+      const existing = resolved.filter((d): d is string => d !== null);
+
+      for (const domain of existing) {
         const result = await probeDomain(domain, options.timeoutMs, true);
         if (result.outcome !== "live" || !result.body) continue;
 
@@ -401,7 +444,7 @@ export async function checkWebsite(
           verdict: "HAS_WEBSITE",
           evidence: {
             ...offline.evidence,
-            guessedDomains: guesses,
+            guessedDomains: existing,
             liveDomains: [domain],
             probedAt: new Date().toISOString(),
             reasons: [...offline.evidence.reasons, `Found a site at ${domain} — ${why}`],
@@ -413,13 +456,13 @@ export async function checkWebsite(
         ...offline,
         evidence: {
           ...offline.evidence,
-          guessedDomains: guesses,
+          guessedDomains: existing,
           probedAt: new Date().toISOString(),
           reasons: [
             ...offline.evidence.reasons,
-            guesses.length > 0
-              ? `Tried ${guesses.length} domain(s) from the name; none served a matching page`
-              : "Name gave no usable domain to guess",
+            guesses.length === 0
+              ? "Name gave no usable domain to guess"
+              : `Checked ${guesses.length} name(s); ${existing.length} resolved, none served a matching page`,
           ],
         },
       };
