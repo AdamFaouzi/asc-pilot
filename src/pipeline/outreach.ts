@@ -294,6 +294,19 @@ async function sendToLead(leadId: string, dryRun: boolean) {
     priceLabelEl: plan.displayPriceEl,
   });
 
+  /*
+   * A dry run leaves no trace. The row used to be written before the send/
+   * don't-send branch, so a rehearsal recorded an outreach attempt with
+   * status QUEUED — and preflight counts anything that is not BLOCKED or
+   * FAILED as already contacted. Reading what would go out therefore
+   * disqualified every lead it read, permanently, which is the opposite of
+   * what a dry run is for.
+   */
+  if (dryRun) {
+    logger.info("outreach.dry_run", { slug: lead.slug, to: email, subject: message.subject });
+    return { email, messageId: "dry-run", preview: message };
+  }
+
   const row = await prisma.outreachMessage.create({
     data: {
       leadId,
@@ -306,14 +319,9 @@ async function sendToLead(leadId: string, dryRun: boolean) {
       template: TEMPLATE_ID,
       provider: env.EMAIL_PROVIDER,
       unsubscribeToken: unsubscribe.split("t=")[1] ?? null,
-      status: dryRun ? "QUEUED" : "SENDING",
+      status: "SENDING",
     },
   });
-
-  if (dryRun) {
-    logger.info("outreach.dry_run", { slug: lead.slug, to: email, subject: message.subject });
-    return { email, messageId: row.id };
-  }
 
   try {
     const result = await getEmailProvider().send(message);
